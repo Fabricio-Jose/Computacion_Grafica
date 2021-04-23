@@ -1,7 +1,4 @@
-import vtk
-
-
-def get_program_parameters():
+eters():
     import argparse
     description = 'Read a VTK XML PolyData file.'
     epilogue = ''''''
