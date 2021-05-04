@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+    <style type="text/css">
+        html, body {
+            margin:0;
+            padding:0;
+            overflow: hidden;
+        }
+        
+        
+
+        #debug-canvas {
+            position: fixed;
+            top: 0;
+            left:0;
+            width:100px;
+            height:100px;
+            image-rendering: pixelated;
+            
+
+        }
+    </style>
+
+</head>
+<body>
+    <canvas id="debug-canvas" width="100" height="100"></canvas>
+    <script src="three.min.js"> </script> 
+    <script src="OrbitControls.js"> </script> 
+    <script src="simplex-noise.js"> </script> 
+
+
+    <script type="module">
+        
+    
+    
+        const COLORS = {
+            GRASS:0x228800,
+            WATER:0x44ccff,
+            TIERRA:0xdbd9bd
+        }
+    
+        
+    
+        // global constants and variables for your app go here
+        let camera, scene, renderer, pointer, stats;
+    
+        let obj
+    
+    
+        let simplex = new SimplexNoise(4);
+        function map(val, smin, smax, emin, emax) {
+            const t =  (val-smin)/(smax-smin)
+            return (emax-emin)*t + emin
+        }
+        function noise(nx, ny) {
+            // Rescale from -1.0:+1.0 to 0.0:1.0
+            return simplex.noise2D(nx, ny) / 2 + 0.5;
+        }
+        function octave(nx,ny,octaves) {
+            let val = 0;
+            let freq = 1;
+            let max = 0;
+            let amp = 1;
+            for(let i=0; i<octaves; i++) {
+                val += noise(nx*freq,ny*freq)*amp;
+                max += amp;
+                amp /= 2;
+                freq  *= 2;
+            }
+            return val/max;
+        }
+    
+        //generate grayscale image of noise
+        function generateTexture() {
+            const canvas = document.getElementById('debug-canvas')
+            const c = canvas.getContext('2d')
+            c.fillStyle = 'black'
+            c.fillRect(0,0,canvas.width, canvas.height)
+    
+            for(let i=0; i<canvas.width; i++) {
+                for(let j=0; j<canvas.height; j++) {
+                    let v =  octave(i/canvas.width,j/canvas.height,16)
+                    const per = (120*v).toFixed(2)+'%'
+                    c.fillStyle = `rgb(${per},${per},${per})`
+                    c.fillRect(i,j,1,1)
+                }
+            }
+            console.log("dfdf")
+            console.log(canvas.width);
+            return c.getImageData(0,0,canvas.width,canvas.height)
+        }
+    
+        function generateMeshFromTexture(data) {
+            //make plane geometry
+            console.log(data.width)
+            console.log(data.height)
+            console.log(data.width)
+            console.log(data.height+1)
+            const geo = new THREE.PlaneGeometry(data.width,data.height,data.width,data.height+1);
+            
+    
+            for(let j=0; j<data.height; j++) {
+                for (let i = 0; i < data.width; i++) {
+                    const n = (j*(data.width)+i)
+                    const nn = (j*(data.width+1)+i)
+                    const col = data.data[n*4]
+                    //console.log(geo.vertices);
+                    const v1 = geo.vertices[nn]
+                    
+                    v1.z = map(col,0,255,-10,10)
+                    if(v1.z > 2.5) v1.z *= 1.6
+                    //jitter x and y
+                    // v1.x += map(Math.random(),0,1,-0.5,0.5)
+                    // v1.y += map(Math.random(),0,1,-0.5,0.5)
+                }
+            }
+            geo.faces.forEach(f=>{
+                const a = geo.vertices[f.a]
+                const b = geo.vertices[f.b]
+                const c = geo.vertices[f.c]
+                const avg = (a.z+b.z+c.z)/3
+                const max = Math.max(a.z,Math.max(b.z,c.z))
+    
+                //if average is below water, set to 0
+                if(avg < 0) {
+                    a.z = 0
+                    b.z = 0
+                    c.z = 0
+                }
+                //assign colors based on the highest point of the face
+                if(max <=0)   return f.color.set(COLORS.TIERRA)
+                if(max <=1.5) return f.color.set(COLORS.GRASS)
+                if(max <=3.5)   return f.color.set(0xeecc44)
+                if(max <=5)   return f.color.set(0xcccccc)
+                f.color.set('white')
+            })
+            geo.colorsNeedUpdate = true
+            geo.verticesNeedUpdate = true
+            geo.computeFlatVertexNormals()
+            const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+                // color:'white',
+                //wireframe:true,
+                vertexColors: THREE.VertexColors,
+                flatShading:true,
+            }))
+            // mesh.position.y = -0
+            // mesh.position.z = -20
+            // mesh.rotation.x = -30 * Math.PI/180
+            return mesh
+        }
+    
+        function jitter(geo,per) {
+            geo.vertices.forEach(v => {
+                v.x += map(Math.random(),0,1,-per,per)
+                v.y += map(Math.random(),0,1,-per,per)
+                v.z += map(Math.random(),0,1,-per,per)
+            })
+        }
+        function chopBottom(geo,bottom) {
+            geo.vertices.forEach(v => {
+                if(v.y < bottom) v.y = bottom
+            })
+        }
+    
+        const toRad = deg => deg * Math.PI/180
+    
+        function makeTree(scale) {
+            const tree = new THREE.Geometry()
+            function randomColor(geo,color,per) {
+                geo.faces.forEach(f => {
+                    f.color.set(color)
+                })
+            }
+            const levels = Math.floor(map(Math.random(),0,5,10,20))
+            for(let i=0; i<levels; i++) {
+                const cone2 = new THREE.ConeGeometry(15+3-i, levels, 8)
+                cone2.translate(0, i*10, 0)
+                randomColor(cone2,0x00ff00,0.2)
+                tree.merge(cone2)
+            }
+    
+            const trunk = new THREE.CylinderGeometry(5.5,5.5,40)
+            trunk.translate(0,18,0)
+            randomColor(trunk,0xbb6600)
+            tree.merge(trunk)
+            tree.translate(0,2,0)
+            jitter(tree,0.05)
+            tree.scale(scale,scale,scale)
+            tree.colorsNeedUpdate = true
+            tree.verticesNeedUpdate = true
+            tree.computeFlatVertexNormals()
+            const mesh = new THREE.Mesh(tree, new THREE.MeshLambertMaterial({
+                // color:'white',
+                // wireframe:true,
+                vertexColors: THREE.VertexColors,
+                flatShading:true,
+            }))
+            return mesh
+        }
+    
+        function makeCloud() {
+            const geo = new THREE.SphereGeometry(2, 16, 8)
+            geo.scale(1.5,1,1)
+    
+            const size2 = map(Math.random(),0,1, 0.5,1.5)
+            const geo2 = new THREE.SphereGeometry(size2,7,5)
+            // const angle = map(Math.random(),0,1,30,90)
+            geo2.rotateX(toRad(90))
+            geo2.scale(2,2,1)
+            geo2.translate(2,0.5,0)
+            geo.merge(geo2)
+    
+            const size3 = map(Math.random(),0,1, 0.5,1.5)
+            const geo3 = new THREE.SphereGeometry(size3,5,7)
+            geo3.rotateZ(toRad(90))
+            geo3.scale(1.5,1.5,1)
+            geo3.translate(-2,0.5,0)
+            geo.merge(geo3)
+    
+    
+            jitter(geo,0.1)
+            chopBottom(geo,-0.0)
+            geo.colorsNeedUpdate = true
+            geo.verticesNeedUpdate = true
+            geo.computeFlatVertexNormals()
+            const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+                 color:'skyblue',
+                // wireframe:true,
+                // vertexColors: THREE.VertexColors,
+                flatShading:true,
+            }))
+            // mesh.position.z = -8
+            // mesh.position.y = 1.5
+            return mesh
+        }
+        const WIDTH = 2;
+
+        const BIRDS = WIDTH * WIDTH;
+
+        class BirdGeometry extends THREE.BufferGeometry {
+
+            constructor() {
+
+                super();
+
+                const trianglesPerBird = 3;
+                const triangles = BIRDS * trianglesPerBird;
+                const points = triangles * 3;
+
+                const vertices = new THREE.BufferAttribute( new Float32Array( points * 3 ), 3 );
+                const birdColors = new THREE.BufferAttribute( new Float32Array( points * 3 ), 3 );
+                const references = new THREE.BufferAttribute( new Float32Array( points * 2 ), 2 );
+                const birdVertex = new THREE.BufferAttribute( new Float32Array( points ), 1 );
+
+                this.setAttribute( 'position', vertices );
+                this.setAttribute( 'birdColor', birdColors );
+                this.setAttribute( 'reference', references );
+                this.setAttribute( 'birdVertex', birdVertex );
+
+                // this.setAttribute( 'normal', new Float32Array( points * 3 ), 3 );
+
+
+                let v = 0;
+
+                function verts_push() {
+
+                    for ( let i = 0; i < arguments.length; i ++ ) {
+
+                        vertices.array[ v ++ ] = arguments[ i ];
+
+                    }
+
+                }
+
+                const wingsSpan = 20;
+
+                for ( let f = 0; f < BIRDS; f ++ ) {
+
+                    // Body
+
+                    verts_push(
+                        0, - 0, - 20,
+                        0, 4, - 20,
+                        0, 0, 30
+                    );
+
+                    // Wings
+
+                    verts_push(
+                        0, 0, - 15,
+                        - wingsSpan, 0, 0,
+                        0, 0, 15
+                    );
+
+                    verts_push(
+                        0, 0, 15,
+                        wingsSpan, 0, 0,
+                        0, 0, - 15
+                    );
+
+                }
+
+                for ( let v = 0; v < triangles * 3; v ++ ) {
+
+                    const triangleIndex = ~ ~ ( v / 3 );
+                    const birdIndex = ~ ~ ( triangleIndex / trianglesPerBird );
+                    const x = ( birdIndex % WIDTH ) / WIDTH;
+                    const y = ~ ~ ( birdIndex / WIDTH ) / WIDTH;
+
+                    const c = new THREE.Color(
+                        0x444444 +
+                        ~ ~ ( v / 9 ) / BIRDS * 0x666666
+                    );
+
+                    birdColors.array[ v * 3 + 0 ] = c.r;
+                    birdColors.array[ v * 3 + 1 ] = c.g;
+                    birdColors.array[ v * 3 + 2 ] = c.b;
+
+                    references.array[ v * 2 ] = x;
+                    references.array[ v * 2 + 1 ] = y;
+
+                    birdVertex.array[ v ] = v % 9;
+
+                }
+
+                this.scale( 0.2, 0.2, 0.2 );
+
+            }
+
+        }
+    
+        /*function makeBirds() {
+            const geo = new THREE.SphereGeometry(2, 16, 8)
+            geo.scale(1.5,1,1)
+    
+            const size2 = map(Math.random(),0,1, 0.5,1.5)
+            const geo2 = new THREE.SphereGeometry(size2,7,5)
+            // const angle = map(Math.random(),0,1,30,90)
+            geo2.rotateX(toRad(90))
+            geo2.scale(2,2,1)
+            geo2.translate(2,0.5,0)
+            geo.merge(geo2)
+    
+            const size3 = map(Math.random(),0,1, 0.5,1.5)
+            const geo3 = new THREE.SphereGeometry(size3,5,7)
+            geo3.rotateZ(toRad(90))
+            geo3.scale(1.5,1.5,1)
+            geo3.translate(-2,0.5,0)
+            geo.merge(geo3)
+    
+    
+            jitter(geo,0.1)
+            chopBottom(geo,-0.0)
+            geo.colorsNeedUpdate = true
+            geo.verticesNeedUpdate = true
+            geo.computeFlatVertexNormals()
+            const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+                 color:'skyblue',
+                // wireframe:true,
+                // vertexColors: THREE.VertexColors,
+                flatShading:true,
+            }))
+            // mesh.position.z = -8
+            // mesh.position.y = 1.5
+            return mesh
+        }*/
+    
+        //called on setup. Customize this
+        function initContent(scene,camera,renderer) {
+            //set the background color of the scene
+            scene.background = new THREE.Color( 0xcccccc );
+    
+            const light = new THREE.DirectionalLight( 0xffffff, 0.7 );
+            light.position.set( 1, 1, 0 ).normalize();
+            scene.add( light );
+    
+            const light2 = new THREE.DirectionalLight( 0xff5566, 0.4 );
+            light2.position.set( -3, -1, 0 ).normalize();
+            scene.add( light2 );
+    
+            scene.add(new THREE.AmbientLight(0xffffff,0.3))  
+    
+            const group = new THREE.Group()
+            group.position.z = -10
+            group.position.y = 0
+            scene.add(group)
+            obj = group
+    
+            //add the terrain
+            const tex = generateTexture()
+            const terrain = generateMeshFromTexture(tex)
+            terrain.rotation.x = toRad(-90)
+            group.add(terrain)
+            group.rotation.y = toRad(-45)
+            group.rotation.x = toRad(0)
+    
+            //find a vertex where z is exactly 0
+            let n = -1;
+            let treeCount = 0
+            let inter=0
+            while(true) {
+                // if(treeCount > 300) break
+                n++;
+                if(n>=terrain.geometry.faces.length) break
+                const f = terrain.geometry.faces[n]
+                const v = terrain.geometry.vertices[f.a]
+                if(f.color.getHex() === COLORS.GRASS && v.z > 0) {
+
+                    if(inter==20)
+                    {
+                        inter=0;
+                        const tree = makeTree(0.1)
+                        tree.position.set(v.x,v.z,-v.y)
+                        group.add(tree)
+                        // console.log(v.z)
+                        treeCount++
+                    }
+
+                    else
+                    {
+                        inter++;
+                    }
+
+                    
+                }
+            }
+    
+    
+            for(let i=0; i<5; i++) {
+                const cloud = makeCloud()
+                cloud.position.set(
+                    map(Math.random(),0,1,-10,10),
+                    8,
+                    map(Math.random(),0,1,-10,10),
+                )
+                group.add(cloud)
+            }
+
+            //group.position.set(-70,0,-40)
+            //group.rotateY(90)
+
+
+            /*for(let i=0; i<5; i++) {
+				const geometry = new BirdGeometry();
+                geometry.position.set(
+                    map(Math.random(),0,1,-10,10),
+                    8,
+                    map(Math.random(),0,1,-10,10),
+                )
+                group.add(geometry)
+            }*/
+        }
+
+
+
+        scene = new THREE.Scene();
+
+        camera = new THREE.PerspectiveCamera(
+            75, // angulo
+            window.innerWidth/window.innerHeight, // aspect, es lo que ve la camara
+            0.1, // near
+            2000 // far
+        );        
+        camera.position.z = 20;
+
+        camera.position.y = 10;
+
+        initContent(scene,camera,renderer)
+
+
+        /////jhon
+
+        const texture_1 = new THREE.TextureLoader().load( 'ladrillos1.jpg' );
+        var material_1 = new THREE.MeshPhongMaterial( {map: texture_1 } );
+        const texture_2 = new THREE.TextureLoader().load( 'ladrillos2.jpg' );
+        var material_2 = new THREE.MeshPhongMaterial( {map: texture_2 } );
+        const texture_3 = new THREE.TextureLoader().load( 'pared2.jpg' );
+        var material_3 = new THREE.MeshPhongMaterial( {map: texture_3 } );
+        const texture_4 = new THREE.TextureLoader().load( 'ventana.jpg' );
+        var material_4 = new THREE.MeshPhongMaterial( {map: texture_4 } );
+        const texture_5 = new THREE.TextureLoader().load( 'puerta2.jpg' );
+        var material_5 = new THREE.MeshPhongMaterial( {map: texture_5 } );
+        const texture_6 = new THREE.TextureLoader().load( 'manija.jpg' );
+        var material_6 = new THREE.MeshPhongMaterial( {map: texture_6 } );
+
+
+        ///////////////////////////////////////////////////////////////////////CASA////////////////////////////////////////////>
+
+
+
+            var i=0;
+            var j=30;
+            const alt_esc=1;
+            var h=1;
+
+            const grupisCasa = new THREE.Group()
+            ///////Techo de la casa: 1er piso
+            while(i<=5){
+
+                if(i<2){
+                    
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(10,alt_esc,j),material_2);
+                    cube1.position.x=-10+h*0.7-0.7;
+                    cube1.position.y=6+h;
+                    grupisCasa.add(cube1);
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(10,alt_esc,j),material_2);
+                    cube2.position.x=10-h*0.7+0.7;
+                    cube2.position.y=6+h;
+                    grupisCasa.add(cube2);
+                    j-=1.4;
+                    h++;
+                }
+                else{
+                    
+                    var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_1);
+                    cube.position.y=6+h;
+                    grupisCasa.add(cube);
+                    j-=1.4;
+                    h++;
+
+                }
+                i++;
+            }
+
+
+            //////adorno central del frente: 1er piso
+            for(var k=0;k<=3;k++){
+                var cube=new THREE.Mesh(new THREE.BoxGeometry(10-k*2.4,alt_esc,27.2),material_1);
+                cube.position.y=10+k;
+                grupisCasa.add(cube);
+            }
+            
+
+
+            ////adornos laterales del frente: 1er piso
+            for(var z=0;z<5;z++){
+                var cube1=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,1.4),material_2);
+                cube1.position.y=8+z;
+                cube1.position.x=-6+1.2*z;
+                cube1.position.z=15-0.7;
+                grupisCasa.add(cube1);
+                var cube2=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,1.4),material_2);
+                cube2.position.y=8+z;
+                cube2.position.x=6-1.2*z;
+                cube2.position.z=15-0.7;
+                grupisCasa.add(cube2);
+            }
+
+            //Adorno superior del frente: 1er pieso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(2.8,3,1.4),material_2);
+            cube.position.y=14;
+            cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            //cuerpo de la casa: primer piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(25.5,8,25.5),material_3);
+            cube.position.y=5;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(25.5,2,25.5),material_2);
+            cube.position.y=0;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            //puerta primer piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(4,7,1),material_5);
+            cube.position.y=2.5;
+            cube.position.z=12.5;
+            grupisCasa.add(cube);
+
+            //manija puerta primer piso
+            var manija=new THREE.Mesh(new THREE.SphereGeometry(0.3,30,30),material_6);
+            manija.position.set(1.7,2.7,13);
+            grupisCasa.add(manija);
+
+            //ventana primer piso
+            for(var i=0;i<13;i+=12){
+                var cube=new THREE.Mesh(new THREE.BoxGeometry(3,3,3),material_4);
+                cube.position.x=-6+i;
+                cube.position.y=3.5;
+                cube.position.z=11.5;
+                grupisCasa.add(cube);
+
+            }
+
+
+            //cuerpo de la casa: 2do piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(20.5,5.5,20.5),material_3);
+            cube.position.y=16.5;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(20.5,1.5,20.5),material_1);
+            cube.position.y=13;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            //ventana 2dp piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(3,3,3),material_4);
+            cube.position.y=16.5;
+            cube.position.z=9;
+            grupisCasa.add(cube);
+
+            
+
+            //cuerpo de la casa: 3er piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(13.2,5.5,13.2),material_3);
+            cube.position.y=28;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(13.2,1.5,13.2),material_1);
+            cube.position.y=24.5;
+            //cube.position.z=15-0.7;
+            grupisCasa.add(cube);
+
+            //ventana 3er piso
+            var cube=new THREE.Mesh(new THREE.BoxGeometry(3,3,3),material_4);
+            cube.position.y=28;
+            cube.position.z=5.5;
+            grupisCasa.add(cube);
+
+            
+
+            
+
+
+            var i=0;
+            var j=24;
+            //const alt_esc=1;
+            var m=1;
+            
+            
+            //techo:2do piso
+
+            while(i<=5){
+
+                if(i<2){
+                    
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(10,alt_esc,j),material_2);
+                    cube1.position.x=-7+m*0.7-0.7;
+                    cube1.position.y=17.5+m;
+                    grupisCasa.add(cube1);
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(10,alt_esc,j),material_2);
+                    cube2.position.x=7-m*0.7+0.7;
+                    cube2.position.y=17.5+m;
+                    grupisCasa.add(cube2);
+                    j-=1.4;
+                    m++;
+                }
+                else{
+                    
+                    var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_1);
+                    cube.position.y=17.5+m;
+                    grupisCasa.add(cube);
+                    j-=1.4;
+                    m++;
+
+                }
+                i++;
+            }
+
+            //////adorno central del frente: 2do piso
+            for(var k=0;k<=3;k++){
+                var cube=new THREE.Mesh(new THREE.BoxGeometry(10-k*2.4,alt_esc,21.2),material_1);
+                cube.position.y=21.5+k;
+                grupisCasa.add(cube);
+            }
+
+            
+            ////Techo: 3er piso
+            var i=0;
+            var s=1;
+            while(i<=5){
+
+                if(i<2){
+                    
+                    
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,13.5),material_2);
+                    cube1.position.x=-7+s*1.1-1.1;
+                    cube1.position.y=29+s;
+                    grupisCasa.add(cube1);
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,13.5),material_2);
+                    cube2.position.x=7-s*1.1+1.1;
+                    cube2.position.y=29+s;
+                    grupisCasa.add(cube2);
+                    s++;
+                }
+                else{
+                    
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,13.5),material_1);
+                    cube1.position.x=-7+s*1.1-1.1;
+                    cube1.position.y=29+s;
+                    grupisCasa.add(cube1);
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,13.5),material_1);
+                    cube2.position.x=7-s*1.1+1.1;
+                    cube2.position.y=29+s;
+                    grupisCasa.add(cube2);
+                    s++;
+
+                }
+                i++;
+            }
+
+            for (var i=0;i<7;i++){
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,2.2),material_2);
+                    cube1.position.x=-7+(i+1)*1.1-1.1;
+                    cube1.position.y=29+(i+1);
+                    cube1.position.z=7.8;
+                    grupisCasa.add(cube1);
+
+                    
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,2.2),material_2);
+                    cube2.position.x=7-(i+1)*1.1+1.1;
+                    cube2.position.y=29+(i+1);
+                    cube2.position.z=7.8;
+                    grupisCasa.add(cube2);
+                
+            }
+
+            for (var i=0;i<7;i++){
+                    var cube1=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,2.2),material_2);
+                    cube1.position.x=-7+(i+1)*1.1-1.1;
+                    cube1.position.y=29+(i+1);
+                    cube1.position.z=-7.8;
+                    grupisCasa.add(cube1);
+
+                    
+                    //var cube=new THREE.Mesh(new THREE.BoxGeometry(j,alt_esc,j),material_2);
+                    var cube2=new THREE.Mesh(new THREE.BoxGeometry(3,alt_esc,2.2),material_2);
+                    cube2.position.x=7-(i+1)*1.1+1.1;
+                    cube2.position.y=29+(i+1);
+                    cube2.position.z=-7.8;
+                    grupisCasa.add(cube2);
+                
+            }
+
+        ///Hueco techo 3er piso
+        for(var i=0;i<4;i++){
+            var cube1=new THREE.Mesh(new THREE.BoxGeometry(10.5-i*1.5,alt_esc,13.2),material_3);
+            cube1.position.y=31+i;
+            grupisCasa.add(cube1);
+        }
+        
+        ///Parte superior del techo
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,13.5),material_1);
+        cube.position.y=36;
+        grupisCasa.add(cube);
+
+        ////adorno tercer piso  //parte delantera
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,2,2.2),material_2);
+        cube.position.y=37;
+        cube.position.z=7.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,4.5),material_2);
+        cube.position.y=38;
+        cube.position.z=8.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,2.2),material_2);
+        cube.position.y=39;
+        cube.position.z=7.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,4.5),material_2);
+        cube.position.y=40;
+        cube.position.z=9;
+        grupisCasa.add(cube);
+
+        //adorno tercer piso parte trasera
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,2,2.2),material_2);
+        cube.position.y=37;
+        cube.position.z=-7.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,4.5),material_2);
+        cube.position.y=38;
+        cube.position.z=-8.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,2.2),material_2);
+        cube.position.y=39;
+        cube.position.z=-7.5;
+        grupisCasa.add(cube);
+        var cube=new THREE.Mesh(new THREE.BoxGeometry(3,1,4.5),material_2);
+        cube.position.y=40;
+        cube.position.z=-9;
+        grupisCasa.add(cube);
+
+        grupisCasa.scale.set(0.3,0.3,0.3);
+        grupisCasa.rotateY(-55);
+
+        grupisCasa.position.set(5,0,30)
+
+        scene.add(grupisCasa);
+
+        //////end jhoon
+
+
+
+        const axesHelper = new THREE.AxesHelper( 300 );
+        scene.add( axesHelper );
+
+
+
+        renderer = new THREE.WebGLRenderer();
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        document.body.appendChild( renderer.domElement );
+        //renderer.render( scene, camera );
+        renderer.render( scene, camera );
+
+        // para los controles del mouse
+        var controls = new THREE.OrbitControls( camera, renderer.domElement );
+        //controls.minDistance = 3; // minima distancia a q puede hacer zoom
+        //controls.maxDistance = 10; // maxima distancia a q puede hacer zoom
+        //controls.enableZoom = false;
+        //controls.enableRotate = false;
+        //controls.maxPolarAngle = Math.PI / 10;
+        
+        //controls.enableDamping = true; // para agregarle inercia
+        //controls.dampingFactor = 0.5;
+
+        // para que el renderer se actualize al redimensionar el navegador
+        window.addEventListener('resize', redimensionar);
+        function redimensionar(){
+            // actualizamos las vcariables que dependen del tamanio delñ navegador
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            renderer.render( scene, camera );
+        }
+
+        var animate = function(){
+            requestAnimationFrame(animate);    
+            controls.update();        
+            
+            renderer.render( scene, camera );
+        }
+
+        animate();
+    
+    </script> 
+
+</body>
+</html>
