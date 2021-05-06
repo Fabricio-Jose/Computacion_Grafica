@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+
+    <!--<script src="three.min.js"> </script> 
+    <script src="OrbitControls.js"> </script> 
+    <script src="dat.gui.min.js"></script>
+    -->
+    <script type='module'>     
+        import * as THREE from './jsm/three.module.js';
+        import { GUI } from './jsm/dat.gui.module.js';
+        import {OrbitControls} from './jsm/OrbitControls.js';
+
+
+        const crossFadeControls = [];
+        let panelSettings;
+        let currentBaseAction = 'tierra';
+
+
+        // utilizado cuando queremos poner la lampara dentro de la scene como un mesh
+        function makeXYZGUI(gui, vector3, name, onChangeFn) {
+            const folder = gui.addFolder(name);
+            folder.add(vector3, 'x', -20, 20).onChange(onChangeFn);
+            folder.add(vector3, 'y', 0, 20).onChange(onChangeFn);
+            folder.add(vector3, 'z', -20, 20).onChange(onChangeFn);
+            folder.open();
+        }      
+
+        // utilizado por GUI para modificar los parametros de light en la scena
+        class ColorGUIHelper {
+            constructor(object, prop) {
+                this.object = object;
+                this.prop = prop;
+            }
+            get value() {
+                return `#${this.object[this.prop].getHexString()}`;
+            }
+            set value(hexString) {
+                this.object[this.prop].set(hexString);
+            }
+        }
+
+        // camera //////////////////////////////////////////////////
+        var aspect = window.innerWidth/window.innerHeight;
+        var camera = new THREE.PerspectiveCamera(75, aspect,0.1, 100000);
+        camera.position.set(0, 10, 20);
+        
+        // scene //////////////////////////////////////////////////
+
+        const fondo_estrellas = new THREE.TextureLoader().load( 'estrellas4.png' );
+        var scene = new THREE.Scene();
+        //scene.backgroundColor = new THREE.Color(0xffffff);
+        scene.background = fondo_estrellas;
+               
+        // mesh //////////////////////////////////////////////////       
+        
+        const texture_sol = new THREE.TextureLoader().load( 'sol.jpg' );
+        var material_sol = new THREE.MeshPhongMaterial( {map: texture_sol } );
+
+        const geometry = new THREE.SphereGeometry( 3, 32, 32 );
+        const material = new THREE.MeshBasicMaterial( {color: 0xffff00} );
+        const sphere = new THREE.Mesh( geometry, material_sol );
+        scene.add( sphere );
+
+
+        const proporOrbitaPlanetas=400;//100*ua
+        const proporDiametroPlanetas=0.001;//100*ua
+        const proporOrbitaSat=0.00006;
+        const proporDiametroSat=0.0006;
+
+        var planetas={
+            mercurio:{
+                rMayor: 0.38700, //UA
+                rMenor: 0.37870, //UA
+                diametro: 4879, //Km
+                velocidadOrbital:  47.4, //km/s
+                anguloOrbita: 7, //grados
+                anguloPlaneta: 0.034,
+                mesh:0,
+                satelites:0
+            },
+            venus:{
+                rMayor: 0.72300, //UA
+                rMenor: 0.72298, //UA
+                diametro: 12104, //Km
+                velocidadOrbital:  35.0, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 177.4,
+                mesh:0,
+                satelites:0
+            },
+            tierra:{
+                rMayor: 1.00000, //UA
+                rMenor: 0.99986, //UA
+                diametro: 12756, //Km
+                velocidadOrbital:  29.8, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 23.4,
+                mesh:0,
+                satelites:{
+                    luna:{
+                        rMayor:384399,
+                        rMenor:383240.41757001,
+                        diametro:3474.2,
+                        velocidadOrbital: 1.022,
+                        anguloOrbita: 5.145,
+                        mesh:0,
+                        eliMesh:0
+                    }
+                }
+            },
+            marte:{
+                rMayor: 1.52400, //UA
+                rMenor: 1.51740, //UA
+                diametro: 6792, //Km
+                velocidadOrbital:  24.1, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 25.2,
+                mesh:0,
+                satelites:{
+                    deimos:{
+                        rMayor:23463.2 ,
+                        rMenor:23463.2 ,
+                        diametro:12.4,
+                        velocidadOrbital: 1.3513,
+                        anguloOrbita: 27.58,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    phobos:{
+                        rMayor:9376 ,
+                        rMenor:9376,
+                        diametro:22.5334,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 1.093,
+                        mesh:0,
+                        eliMesh:0
+
+                    }
+                }
+            },
+            jupiter:{
+                rMayor: 5.20440, //UA
+                rMenor: 5.19820, //UA
+                diametro: 142984, //Km
+                velocidadOrbital:  13.1, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 3.1,
+                mesh:0,
+                satelites:{
+					Io:{
+						rMayor:421700,
+                        rMenor:421700,
+                        diametro:3642.2,
+                        velocidadOrbital: 17.334,
+                        anguloOrbita: 0.04,
+                        mesh:0,
+                        eliMesh:0
+					},
+					Europa:{
+						rMayor:670900,
+                        rMenor:670900,
+                        diametro:3121.6,
+                        velocidadOrbital: 13.740,
+                        anguloOrbita: 0.47,
+                        mesh:0,
+                        eliMesh:0
+					},
+					Ganimedes:{
+						rMayor:1070000,
+                        rMenor:1070000,
+                        diametro:5268.2,
+                        velocidadOrbital: 10.880,
+                        anguloOrbita: 0.2,
+                        mesh:0,
+                        eliMesh:0
+					},
+					Calisto:{
+						rMayor:1883000,
+                        rMenor:1883000,
+                        diametro:4821.2,
+                        velocidadOrbital: 8.204,
+                        anguloOrbita: 0.4,
+                        mesh:0,
+                        eliMesh:0
+					}
+				}
+            },
+            saturno:{
+                rMayor: 9.58260, //UA
+                rMenor: 9.56730, //UA
+                diametro: 120536, //Km
+                velocidadOrbital:  9.7, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 26.7,
+                mesh:0,
+                satelites: {
+                    titan: {
+                        rMayor: 1221870,
+                        rMenor: 1221870,
+                        diametro: 5150,
+                        velocidadOrbital: 0.3513,
+                        anguloOrbita: 0.248,
+                        mesh: 0,
+                        eliMesh: 0
+                    },
+                    rea: {
+                        rMayor: 5271208,
+                        rMenor: 5272108,
+                        diametro: 1528,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 0.345,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    japeto: {
+                        rMayor: 3560820,
+                        rMenor: 3560820,
+                        diametro: 1436,
+                        velocidadOrbital: 0.28,
+                        anguloOrbita: 4.28,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    mimas: {
+                        rMayor: 1855200,
+                        rMenor: 1855200,
+                        diametro: 396.4,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 1.53,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    encefalo: {
+                        rMayor: 2379480,
+                        rMenor: 2379480,
+                        diametro: 499,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 0.09,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    dione: {
+                        rMayor: 3770396,
+                        rMenor: 3770396,
+                        diametro: 1118.4,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 0.019,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    tetis: {
+                        rMayor: 2574730,
+                        rMenor: 2574730,
+                        diametro: 396.4,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 1.12,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    febe: {
+                        rMayor: 12955759,
+                        rMenor: 12955759,
+                        diametro: 396.4,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 173.04,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    hiperion: {
+                        rMayor: 1481009,
+                        rMenor: 1481009,
+                        diametro: 270,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 1.53,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+                    epimeteo: {
+                        rMayor: 385520,
+                        rMenor: 385520,
+                        diametro: 1162.4,
+                        velocidadOrbital: 0.138,
+                        anguloOrbita: 1.53,
+                        mesh: 0,
+                        eliMesh: 0
+
+                    },
+
+                }
+            },
+            urano:{
+                rMayor: 19.21840, //UA
+                rMenor: 19.19770, //UA
+                diametro: 51118, //Km
+                velocidadOrbital:  6.8, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 97.8,
+                mesh:0,
+                satelites:{
+                    miranda:{
+                        rMayor:129390 ,
+                        rMenor:129390,
+                        diametro:471.6,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 4.232,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    ariel:{
+                        rMayor: 191020,
+                        rMenor:191020,
+                        diametro:1157.8,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.260,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    umbriel:{
+                        rMayor: 266300,
+                        rMenor:266300,
+                        diametro:1169.4,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.205,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    titania:{
+                        rMayor: 435910,
+                        rMenor:435910,
+                        diametro:1576.8,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.340,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    oberon:{
+                        rMayor: 583520,
+                        rMenor:583520,
+                        diametro:1522.8,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.058,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    francisco:{
+                        rMayor: 4282900,
+                        rMenor:4282900,
+                        diametro:22,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 147.250,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    caliban:{
+                        rMayor: 7231100,
+                        rMenor:7231100,
+                        diametro:42,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 141.529,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    stephano:{
+                        rMayor: 8007400,
+                        rMenor:8007400,
+                        diametro:32,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 143.819,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    trinculo:{
+                        rMayor: 8505200,
+                        rMenor:8505200,
+                        diametro:18,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 166.971,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    sycorax:{
+                        rMayor: 12179400,
+                        rMenor:12179400,
+                        diametro:157,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 159.420,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    margaret:{
+                        rMayor: 14146700,
+                        rMenor:14146700,
+                        diametro:20,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 57.367,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    prospero:{
+                        rMayor: 16276800,
+                        rMenor:16276800,
+                        diametro:50,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 151.830,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    setebos:{
+                        rMayor: 17420400,
+                        rMenor:17420400,
+                        diametro:48,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 158.235,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    ferminand:{
+                        rMayor: 20430000,
+                        rMenor:20430000,
+                        diametro:20,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 169.793,
+                        mesh:0,
+                        eliMesh:0
+                    }
+                }
+            },
+            neptuno:{
+                rMayor: 30.11000, //UA
+                rMenor: 30.10870, //UA
+                diametro: 49528, //Km
+                velocidadOrbital:  5.4, //km/s
+                anguloOrbita: 3.4, //grados
+                anguloPlaneta: 28.3,
+                mesh:0,
+                satelites:{
+                    naiad:{
+                        rMayor:48224 ,
+                        rMenor:48224,
+                        diametro:60.4,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita:4.691 ,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Thalassa:{
+                        rMayor: 50074	,
+                        rMenor:50074	,
+                        diametro:81.4,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.135,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Despina:{
+                        rMayor: 52526,
+                        rMenor:52526,
+                        diametro:156,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.068,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Galatea:{
+                        rMayor: 61953,
+                        rMenor:61953,
+                        diametro:174.8,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.034	,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Larissa:{
+                        rMayor: 73548,
+                        rMenor:73548,
+                        diametro:194,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.205,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Hippocamp:{
+                        rMayor: 105283,
+                        rMenor:105283,
+                        diametro:34.8,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.064,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Proteus:{
+                        rMayor: 117646,
+                        rMenor:117646,
+                        diametro:420,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 0.075,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Triton:{
+                        rMayor: 354759,
+                        rMenor:354759,
+                        diametro:2705.2,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 156.865,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Nereid:{
+                        rMayor: 5513800	,
+                        rMenor:5513800	,
+                        diametro:357,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 7.090,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Halimede:{
+                        rMayor: 16681000,
+                        rMenor:16681000,
+                        diametro:62,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 112.898,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    sao:{
+                        rMayor: 22619000,
+                        rMenor:22619000,
+                        diametro:44,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 49.907	,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Laomedeia:{
+                        rMayor: 23613000,
+                        rMenor:23613000,
+                        diametro:42,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 34.049	,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Psamathe:{
+                        rMayor: 46705000,
+                        rMenor:46705000,
+                        diametro:40,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 137.679	,
+                        mesh:0,
+                        eliMesh:0
+                    },
+                    Neso:{
+                        rMayor: 50258000,
+                        rMenor:50258000,
+                        diametro:60,
+                        velocidadOrbital: 2.138,
+                        anguloOrbita: 131.265,
+                        mesh:0,
+                        eliMesh:0
+                    }
+                }
+            }
+        };
+
+        var otros={
+            pluton:{
+                rMayor: 39.4821, //UA
+                rMenor: 38.28876, //UA
+                diametro: 2370, //Km
+                velocidadOrbital:  4.7, //km/s
+                anguloOrbita: 17.2 //grados
+            }
+            
+
+        };
+
+
+        const material2 = new THREE.LineBasicMaterial( { color : 0xff0000 } );
+        const material3 = new THREE.LineBasicMaterial( { color : 0x60ff00 } );
+        
+        const material4 = new THREE.MeshBasicMaterial( {color: 0xffff00, wireframe:true}  );
+        const material5 = new THREE.LineBasicMaterial( { color : 0xff00c0 } );
+        const material6 = new THREE.LineBasicMaterial( { color : 0xffffff } );
+        var geoPlanetas=[];
+
+        const texture_1 = new THREE.TextureLoader().load( 'mercurio.jpg' );
+        var material_1 = new THREE.MeshPhongMaterial( {map: texture_1 } );
+        const texture_2 = new THREE.TextureLoader().load( 'venus.jpg' );
+        var material_2 = new THREE.MeshPhongMaterial( {map: texture_2 } );
+        const texture_3 = new THREE.TextureLoader().load( 'tierra.jpg' );
+        var material_3 = new THREE.MeshPhongMaterial( {map: texture_3 } );
+        const texture_4 = new THREE.TextureLoader().load( 'marte.jpg' );
+        var material_4 = new THREE.MeshPhongMaterial( {map: texture_4 } );
+        const texture_5 = new THREE.TextureLoader().load( 'jupiter.jpg' );
+        var material_5 = new THREE.MeshPhongMaterial( {map: texture_5 } );
+        const texture_6 = new THREE.TextureLoader().load( 'saturno.jpg' );
+        var material_6 = new THREE.MeshPhongMaterial( {map: texture_6 } );
+        const texture_7 = new THREE.TextureLoader().load( 'urano.jpg' );
+        var material_7= new THREE.MeshPhongMaterial( {map: texture_7 } );
+        const texture_8 = new THREE.TextureLoader().load( 'neptuno.jpg' );
+        var material_8 = new THREE.MeshPhongMaterial( {map: texture_8 } );
+        const texture_9 = new THREE.TextureLoader().load( 'pluton.jpg' );
+        var material_9 = new THREE.MeshPhongMaterial( {map: texture_9 } );
+
+
+        var textur=[material_1,material_2,material_3,material_4,material_5,material_6,material_7,material_8]
+        
+        let i=0;
+
+        //planetas
+        Object.keys(planetas).forEach(function(key) {
+
+            //elipses
+            let curve = new THREE.EllipseCurve(
+                0,  0,            // ax, aY
+                (planetas[key].rMayor)*proporOrbitaPlanetas, (planetas[key].rMenor)*proporOrbitaPlanetas,           // xRadius, yRadius
+                0,  2 * Math.PI,  // aStartAngle, aEndAngle
+                false,            // aClockwise
+                planetas[key].anguloOrbita                // aRotation
+            );
+            let points2 = curve.getPoints( 100 );
+            let geometry2=new THREE.BufferGeometry().setFromPoints( points2 );
+            let ellipse = new THREE.Line( geometry2, material2 );
+            scene.add(ellipse);
+            ellipse.rotateX(Math.PI/2);
+            ellipse.rotateY((Math.PI*planetas[key].anguloOrbita)/180);
+            
+            
+            
+            //esferas
+            //console.log((planetas[key].rMayor)*proporOrbitaPlanetas/2);
+            let geometry = new THREE.SphereGeometry( planetas[key].diametro*proporDiametroPlanetas/2, 32, 32 );
+            
+            let sphere = new THREE.Mesh( geometry, textur[i] );
+            i++;
+
+            
+            
+            sphere.position.set(0,0,(planetas[key].rMenor)*proporOrbitaPlanetas);
+            sphere.rotateX(planetas[key].anguloPlaneta*Math.PI/180);
+
+
+            scene.add( sphere);
+            planetas[key].mesh=sphere;
+
+            //satelites
+
+            if (planetas[key].satelites!=0)
+            {
+                var sat=planetas[key].satelites;
+                Object.keys(sat).forEach(function(key2) {
+
+                    
+                    //orbitas
+                    let curve = new THREE.EllipseCurve(
+                        0,  0,            // ax, aY
+                        (sat[key2].rMayor)*proporOrbitaSat, (sat[key2].rMenor)*proporOrbitaSat,           // xRadius, yRadius
+                        0,  2 * Math.PI,  // aStartAngle, aEndAngle
+                        false,            // aClockwise
+                        sat[key2].anguloOrbita                // aRotation
+                    );
+                    let points2 = curve.getPoints( 50 );
+                    let geometry2=new THREE.BufferGeometry().setFromPoints( points2 );
+                    let ellipse = new THREE.Line( geometry2, material5 );
+                    scene.add(ellipse);
+                    ellipse.rotateX(Math.PI/2);
+                    ellipse.rotateY((Math.PI*sat[key2].anguloOrbita)/180);
+                    ellipse.position.x=planetas[key].mesh.position.x;
+                    ellipse.position.z=planetas[key].mesh.position.z;
+                    ellipse.position.y=planetas[key].mesh.position.y;
+                    sat[key2].eliMesh=ellipse;
+
+
+                    //satelites
+                    //console.log((planetas[key].rMayor)*proporOrbitaPlanetas/2);
+                    if(sat[key2].diametro>1000)
+                    {
+                        let geometry = new THREE.SphereGeometry( sat[key2].diametro*proporDiametroSat/2, 32, 32 );
+                    
+                        let sphere = new THREE.Mesh( geometry, material6 );
+
+                        
+                        
+                        sphere.position.set(0,0,(planetas[key].rMenor)*proporOrbitaPlanetas);
+                        sphere.rotateX(planetas[key].anguloPlaneta*Math.PI/180);
+
+
+                        scene.add( sphere);
+                        sat[key2].mesh=sphere;
+                    }
+                    
+
+
+
+                });
+
+
+            }
+            
+
+            
+        });
+
+        //otros
+        Object.keys(otros).forEach(function(key) {
+
+            let curve = new THREE.EllipseCurve(
+                0,  0,            // ax, aY
+                (otros[key].rMayor)*proporOrbitaPlanetas, (otros[key].rMenor)*proporOrbitaPlanetas,           // xRadius, yRadius
+                0,  2 * Math.PI,  // aStartAngle, aEndAngle
+                false,            // aClockwise
+                0                // aRotation
+            );
+            let points2 = curve.getPoints( 50 );
+            let geometry2=new THREE.BufferGeometry().setFromPoints( points2 );
+            let ellipse = new THREE.Line( geometry2, material_9 );
+            scene.add(ellipse);
+            ellipse.rotateX(Math.PI/2);
+            ellipse.rotateY((otros[key].anguloOrbita)*Math.PI/180);
+            
+            //esferas
+
+
+            console.log((otros[key].rMayor)*proporOrbitaPlanetas/2);
+            let geometry = new THREE.SphereGeometry( otros[key].diametro*proporDiametroPlanetas/2, 32, 32 );
+            
+            let sphere = new THREE.Mesh( geometry, material4 );
+            
+            sphere.position.set(0,0,(otros[key].rMenor)*proporOrbitaPlanetas);
+            scene.add( sphere );
+        });
+
+        
+        
+
+
+        
+        
+
+       
+        
+        ////////////////////////////////////////////////////////////
+        // HemisphereLight light ///////////////////////////////////
+        const skyColor = 0xB1E1FF;  // light blue
+        const groundColor = 0x59340B;  // black
+        const hemisphere_light = new THREE.HemisphereLight(skyColor, groundColor, 0.5);
+        scene.add(hemisphere_light);        
+        ////////////////////////////////////////////////////////////
+        ////////////////////////////////////////////////////////////
+
+        ////////////////////////////////////////////////////////////
+        // DirectionalLight  ///////////////////////////////////////
+        const color = 0xFFFFFF;
+        const intensity = 0.5;
+        const light = new THREE.DirectionalLight(color, intensity);
+        light.position.set(5, 10, 10);
+        light.target.position.set(0, 0, 0);
+        scene.add(light);
+        scene.add(light.target);
+
+        const luzP = new THREE.PointLight( 0xffffff, 1, 10000 );
+        light.position.set( 0, 0, 0 );
+        scene.add( luzP );
+
+
+        const helper = new THREE.DirectionalLightHelper(light);
+        scene.add(helper);
+
+        function updateLight() {
+            light.target.updateMatrixWorld();
+            helper.update();
+        }
+        updateLight();        
+        // gui
+        const gui = new GUI();
+        panelSettings = {
+					'modify time scale': 1.0
+				};
+        const panel1=gui.addFolder('Planetas')
+
+        const planetasNombre=Object.keys(planetas);
+
+        for ( let i = 0, l = planetasNombre.length; i !== l; ++ i ) {
+
+            const name = planetasNombre[ i ];
+            const settings = planetas[ name ];
+            panelSettings[ name ] = function () {
+
+            const currentSettings = planetas[ currentBaseAction ];
+            const currentAction = currentSettings.mesh;
+            const action = settings ? settings.action : null;
+            currentBaseAction=name;
+
+            prepareCrossFade( currentAction, action, 0.35 );
+
+            };
+            crossFadeControls.push( panel1.add( panelSettings, name ) );
+
+
+
+        }
+
+
+        //gui.addColor(new ColorGUIHelper(light, 'color'), 'value').name('color');
+        //gui.add(light, 'intensity', 0, 2, 0.01);
+        //makeXYZGUI(gui, light.position, 'position', updateLight);
+        //makeXYZGUI(gui, light.target.position, 'target', updateLight); 
+        //////////////////////////////////////////////////////////// 
+        ////////////////////////////////////////////////////////////
+
+        
+        // renderer //////////////////////////////////////////////////
+        var renderer = new THREE.WebGLRenderer();
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        document.body.appendChild( renderer.domElement );
+        renderer.render( scene, camera );
+        //renderer.shadowMapEnable = true;
+        //renderer.shadowMapEnable = true;
+        
+        // OrbitControls /////////////////////////////////////////////
+        var controls = new OrbitControls( camera, renderer.domElement );
+        var a = new THREE.Vector3(0,0,planetas.tierra.rMayor*proporOrbitaPlanetas);
+        controls.target=a
+        
+        // axes ///////////////////////////////////////////////////////
+        const axesHelper = new THREE.AxesHelper( 5000 );
+        scene.add( axesHelper );
+
+        var foco=sphere;
+        function prepareCrossFade( startAction, endAction, duration ) {
+            foco=planetas[currentBaseAction].mesh ;
+            console.log(foco);
+            
+        }
+                
+        // animation //////////////////////////////////////////////////
+        var animate = function(t){
+            requestAnimationFrame(animate);
+            renderer.render( scene, camera );
+
+            var a = new THREE.Vector3(foco.position.x,foco.position.y,foco.position.z);
+            controls.target=a
+
+            
+            
+
+            //planetas.tierra.mesh.position.x=planetas.tierra.mesh.position.x+1;
+
+            Object.keys(planetas).forEach(function(key) {
+
+                planetas[key].mesh.position.x = Math.sin(t / 65000*planetas[key].velocidadOrbital) * planetas[key].rMayor*proporOrbitaPlanetas;
+                planetas[key].mesh.position.z = Math.cos(t / 65000*planetas[key].velocidadOrbital) * planetas[key].rMayor*proporOrbitaPlanetas;
+
+                //planetas[key].mesh.position.x=planetas[key].mesh.position.x+1;
+
+                
+                if (planetas[key].satelites!=0)
+                {
+                    var sat=planetas[key].satelites;
+                    Object.keys(sat).forEach(function(key2) {
+
+                        sat[key2].eliMesh.position.x=planetas[key].mesh.position.x;
+                        sat[key2].eliMesh.position.z=planetas[key].mesh.position.z;
+                        sat[key2].eliMesh.position.y=planetas[key].mesh.position.y;
+
+                        if(sat[key2].mesh!=0)
+                        {
+
+                            //console.log(sat[key2])
+                            sat[key2].mesh.position.x = Math.sin(t / 65*sat[key2].velocidadOrbital) * sat[key2].rMayor*proporOrbitaSat+planetas[key].mesh.position.x;
+                            sat[key2].mesh.position.z = Math.cos(t / 65*sat[key2].velocidadOrbital) * sat[key2].rMayor*proporOrbitaSat+planetas[key].mesh.position.z;
+                        }
+
+                    });
+                }
+
+
+            });
+
+        }
+        animate(new Date().getTime());
+
+        // redimensioar  /////////////////////////////////////////////
+        window.addEventListener('resize', redimensionar);
+        function redimensionar(){
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            renderer.render( scene, camera );
+        }
+    </script>    
+
+</body>
+</html>
